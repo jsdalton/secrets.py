@@ -1,0 +1,7 @@
+## The following requirements were added by pip --freeze:
+Fabric==1.5.3
+distribute==0.6.31
+nose==1.2.1
+paramiko==1.9.0
+pycrypto==2.6
+wsgiref==0.1.2
