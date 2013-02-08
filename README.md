@@ -1,6 +1,6 @@
 # Secrets.py
 
-Secrets.py is a small Python library that makes it easy to encrypt and decrypt both messages and values. It's really just a friendly interface to some of the cryptographic tools in the [PyCrypto](https://www.dlitz.net/software/pycrypto/) library.
+Secrets.py is a small Python library that makes it easy to encrypt and decrypt both messages and files. It's really just a friendly interface to some of the cryptographic tools in the [PyCrypto](https://www.dlitz.net/software/pycrypto/) library.
 
 ## Usage
 ### Encrypt and Decrypt
