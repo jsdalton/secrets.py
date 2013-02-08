@@ -22,7 +22,7 @@ By default, encrypted messages are base64 encoded. Messages can be binary encode
 
 ### Verified Encrypt and Decrypt
 
-Messages can also be encrypted in a "verifiable" format ()via `verify_encrypt()`), which allows you to `verify()` a key:
+Messages can also be encrypted in a "verifiable" format via `verify_encrypt()`, which allows you to `verify()` a key:
 
 ````
 >>> msg = "One if by land; two if by sea"
@@ -107,7 +107,7 @@ False
 True
 ````
 
-If either the key or file contents are incorrect, `verified_file_decrypt()` raises a `ValueError`:
+If either the key or file contents are incorrect, `verified_decrypt_file()` raises a `ValueError`:
 
 ````
 >>> secrets.verified_decrypt_file("Bad password!", 'config.ini.encrypted')
@@ -133,7 +133,7 @@ Whereas the correct key will silently succeed:
 ... 
 '[Values]\nfoo = bar\nbar = baz\n\n[More Values]\nthis = that\nsalt = pepper\n'
 ````
-As with `decrypt()`, the unverified `decrypt_file()` will result in binary garbage if the key is wrong or the encrypted message is corrupt.
+As with `decrypt()`, `decrypt_file()` will result in binary garbage if the key is wrong or the encrypted message is corrupt.
 
 
 ## Granular Control
