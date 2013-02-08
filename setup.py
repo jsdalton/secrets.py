@@ -9,7 +9,7 @@ setup(
     name='secrets.py',
     version=secrets.__version__,
     packages=['secrets'],
-    license='Creative Commons Attribution-Noncommercial-Share Alike license',
+    license=open('LICENSE').read(),
     long_description=open('README.md').read(),
     test_suite='nose.collector',
     tests_require=['nose', 'mock'],
