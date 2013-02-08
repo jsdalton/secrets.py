@@ -6,7 +6,7 @@ import unittest
 
 from secrets import (encrypt, decrypt, verified_encrypt, verified_decrypt,
                      verify, encrypt_file, decrypt_file, verified_encrypt_file,
-                     verified_decrypt_file)
+                     verified_decrypt_file, verify_file)
 
 from tests import TEST_FILES_DIR
 
@@ -58,7 +58,29 @@ class SecretsTest(unittest.TestCase):
         encrypted_msg = verified_encrypt(TEST_KEY, msg, base64_encode=False)
         decrypted_msg = verified_decrypt(TEST_KEY, encrypted_msg, base64_decode=False)
 
-        self.assertEqual(msg, decrypted_msg)
+        self.assertEqual(decrypted_msg, msg)
+
+    def test_verified_decrypt_should_return_none_with_bad_key(self):
+        msg = "This is my party."
+        encrypted_msg = verified_encrypt(TEST_KEY, msg, base64_encode=False)
+
+        decrypted_msg = verified_decrypt("bad key!", encrypted_msg, base64_decode=False)
+
+        self.assertEqual(decrypted_msg, None)
+
+    def test_verified_decrypt_should_return_none_with_bad_msg(self):
+        msg = "This is my party."
+        bad_msg = "blah1" # Incorrect base64 padding
+
+        # base 64
+        encrypted_msg = verified_encrypt(TEST_KEY, msg, base64_encode=True)
+        decrypted_msg = verified_decrypt(TEST_KEY, bad_msg, base64_decode=True)
+        self.assertEqual(decrypted_msg, None)
+
+        # not base 64
+        encrypted_msg = verified_encrypt(TEST_KEY, msg, base64_encode=False)
+        decrypted_msg = verified_decrypt(TEST_KEY, bad_msg, base64_decode=False)
+        self.assertEqual(decrypted_msg, None)
 
     def test_verified_encrypt_and_decrypt_in_base64_should_be_reversible(self):
         msg = "This is my party."
@@ -76,7 +98,12 @@ class SecretsTest(unittest.TestCase):
         msg = "This is my party."
         encrypted_msg = verified_encrypt(TEST_KEY, msg, base64_encode=False)
 
-        self.assertTrue(verify(TEST_KEY, encrypted_msg, base64_decode=False))
+        self.assertEqual(verify(TEST_KEY, encrypted_msg, base64_decode=False), True)
+        self.assertEqual(verify("bad key!", encrypted_msg, base64_decode=False), False)
+
+        # base 64 check
+        encrypted_msg = verified_encrypt(TEST_KEY, msg, base64_encode=True)
+        self.assertEqual(verify(TEST_KEY, "blah1", base64_decode=True), False)
 
     def test_verify_base64(self):
         msg = "This is my party."
@@ -84,7 +111,7 @@ class SecretsTest(unittest.TestCase):
 
         self.assertTrue(verify(TEST_KEY, encrypted_msg, base64_decode=True))
 
-    def test_encrypt_and_decrypt_are_reversible(self):
+    def test_encrypt_and_decrypt_file_are_reversible(self):
         # setup - create test file
         shutil.copyfile(self.filepath['unencrypted'], self.filepath['test'])
 
@@ -104,7 +131,7 @@ class SecretsTest(unittest.TestCase):
                                     self.filepath['unencrypted']),
                         "Files don't match!")
 
-    def test_encrypt_and_decrypt_verified_are_reversible(self):
+    def test_encrypt_and_decrypt_file_verified_are_reversible(self):
         # setup - create test file
         shutil.copyfile(self.filepath['unencrypted'], self.filepath['test'])
 
@@ -125,3 +152,21 @@ class SecretsTest(unittest.TestCase):
         self.assertTrue(filecmp.cmp(self.filepath['test'],
                                     self.filepath['unencrypted']),
                         "Files don't match!")
+
+    def test_verify_file(self):
+        # setup - create test file
+        shutil.copyfile(self.filepath['unencrypted'], self.filepath['test'])
+        verified_encrypt_file(TEST_KEY,
+                              self.filepath['test'],
+                              self.filepath['encryption-test-result'])
+
+        self.assertEqual(verify_file(TEST_KEY,
+                                     self.filepath['encryption-test-result']),
+                         True)
+        self.assertEqual(verify_file("Bad password!",
+                                     self.filepath['encryption-test-result']),
+                         False)
+        # Test bad file input
+        self.assertEqual(verify_file("Bad password!",
+                                     self.filepath['test']),
+                         False)
