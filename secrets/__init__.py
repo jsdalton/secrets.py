@@ -1,7 +1,7 @@
 import base64
 from .cryptors import Cryptor, FileCryptor
 
-__version__ = '0.1'
+__version__ = '0.2'
 
 
 def encrypt(key, msg, base64_encode=True):

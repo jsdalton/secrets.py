@@ -1,4 +1,4 @@
-**Warning: Use this library at your own risk!** Please see [here](http://news.ycombinator.com/item?id=5335330) and [here](http://news.ycombinator.com/item?id=5335235) for possible security vulnerabilities contained in this implementation. Consider [Sodium](https://github.com/jedisct1/libsodium) and its accompanying Python library [PyNaCl](https://github.com/dstufft/pynacl) for an implementation that affords true security guarantees.
+**Warning: Use this library at your own risk!** Consider [Sodium](https://github.com/jedisct1/libsodium) and its accompanying Python library [PyNaCl](https://github.com/dstufft/pynacl) for an implementation that affords true security guarantees and has been thoroughly vetted by cryptographic experts.
 
 # Secrets.py
 
@@ -146,9 +146,12 @@ If you need finer control than the main API provides, use the `Cryptor` and `Fil
 
 Secrets is just a simplified wrapper around PyCrypto, which handles the majority of the actual cryptography. A few notes:
 
+* You probably **should not** be using this library. It has not been vetted by cryptographic experts. It is unlikely that it is *worse* than using PyCrypto directly, but there are more secure options such as [Keyczar](http://www.keyczar.org/) and [Sodium](https://github.com/jedisct1/libsodium)/[PyNaCl](https://github.com/dstufft/pynacl). Use it at your own risk.
+* Definitely don't use this to store decryptable passwords. Passwords should be stored with a one-way hash like [bcrypt](https://pypi.python.org/pypi/py-bcrypt/).
 * By default, Secrets uses the [AES cipher](https://www.dlitz.net/software/pycrypto/api/current/Crypto.Cipher.AES-module.html) in [CFB mode](https://www.dlitz.net/software/pycrypto/api/current/Crypto.Cipher.blockalgo-module.html#MODE_CFB). The `Cryptor` class can optionally be initialized with other cipher classes from PyCrypto. It has been tested with [DES](https://www.dlitz.net/software/pycrypto/api/current/Crypto.Cipher.DES-module.html) and [Blowfish](https://www.dlitz.net/software/pycrypto/api/current/Crypto.Cipher.Blowfish-module.html). Padding is set automatically with the PyCrypto Random module.
-* Secrets hashes the provided key, by default with [hashlib.sha256](http://docs.python.org/2/library/hashlib.html) though other digest modes can be specified. Note that hashing the key does not provide additional security, but is simply a means to normalize the key size required by the cipher. Secrets will attempt to use the longest key size available for the cipher and digest mode selected.
-* The `verified_*` functions all work by prepending an [HMAC](http://docs.python.org/2/library/hmac.html) digest to the encrypted message. HMAC provides a high degree of security, since the correct digest can only be derived from the key *and* the correctly decrypted message. (The purpose of these functions is, for example, to protect a correctly decrypted file from being overwritten with garbage if an incorrect key is inadvertently provided.) The HMAC digest is computed with specified digest mode (hashlib.sha256 by default).
+* Secrets derives the key used for encryption from the provided key using [PBKDF2](http://en.wikipedia.org/wiki/PBKDF2). PBKDF2 requires a random salt, which is generated automatically and prepended to the encrypted file/string for use in decryption. The key length is the maximum allowed for the chosen cipher class.
+* The `verified_*` functions all work by prepending an [HMAC](http://docs.python.org/2/library/hmac.html) digest to the encrypted message. HMAC provides a high degree of security, since the correct digest can only be derived from the key *and* the correctly decrypted message. (The purpose of these functions is, for example, to protect a correctly decrypted file from being overwritten with garbage if an incorrect key is inadvertently provided.) The HMAC digest is computed with specified digest mode (`hashlib.sha256` by default).
+* Version 0.2 fixes a potential security flaw where the key could be exposed by testing the time it takes to verify the hash.
 * Please contact me directly or open an issue if you observe any security flaws minor or severe in this library.
 
 
