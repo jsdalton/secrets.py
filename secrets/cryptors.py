@@ -10,12 +10,11 @@ class BaseCryptor(object):
     """
     A simple value encryptor / decryptor. Uses CFB mode for encryption
     """
-    def __init__(self, key, cipher_cls=AES, random_generator_cls=Random, digestmod=hashlib.sha256):
+    def __init__(self, cipher_cls=AES, random_generator_cls=Random, digestmod=hashlib.sha256):
         self.mode = blockalgo.MODE_CFB
         self.digestmod = digestmod
         self.cipher_cls = cipher_cls
         self.block_size = cipher_cls.block_size
-        self.key = self.hash_key(key)
         self.random_generator = random_generator_cls.new()
 
     def hash_key(self, key):
@@ -52,31 +51,33 @@ class BaseCryptor(object):
         else:
             return b'1'*self.cipher_cls.block_size
 
-    def cipher(self, iv):
-        return self.cipher_cls.new(self.key, self.mode, iv)
+    def cipher(self, derived_key, iv):
+        return self.cipher_cls.new(derived_key, self.mode, iv)
 
 
 class Cryptor(BaseCryptor):
     """
     A simple message encryptor / decryptor. Uses CFB mode for encryption
     """
-    def encrypt(self, msg, verify=False):
+    def encrypt(self, key, msg, verify=False):
+        derived_key = self.hash_key(key)
         iv = self.initialization_vector()
-        cipher = self.cipher(iv)
+        cipher = self.cipher(derived_key, iv)
         encrypted_msg = iv + cipher.encrypt(msg)
 
         if verify:
-            h = hmac.new(self.key, msg=msg, digestmod=self.digestmod)
+            h = hmac.new(derived_key, msg=msg, digestmod=self.digestmod)
             encrypted_msg = h.digest() + encrypted_msg
 
         return encrypted_msg
 
-    def decrypt(self, encrypted_msg, verify=False):
+    def decrypt(self, key, encrypted_msg, verify=False):
+        derived_key = self.hash_key(key)
         iv = self.initialization_vector(random=False)
-        cipher = self.cipher(iv)
+        cipher = self.cipher(derived_key, iv)
 
         if verify:
-            digest_size = self.verify(encrypted_msg)
+            digest_size = self.verify(key, encrypted_msg)
             if digest_size is False:
                 raise ValueError("Bad key or encrypted message.")
             raw_msg = encrypted_msg[digest_size:]
@@ -85,15 +86,16 @@ class Cryptor(BaseCryptor):
 
         return cipher.decrypt(raw_msg)[self.cipher_cls.block_size:]
 
-    def verify(self, encrypted_msg):
+    def verify(self, key, encrypted_msg):
         """
         Returns True if key and encrypted message are valid (and the message
         was a verified encryption), False otherwise.
         """
+        derived_key = self.hash_key(key)
         iv = self.initialization_vector(random=False)
-        cipher = self.cipher(iv)
+        cipher = self.cipher(derived_key, iv)
 
-        h = hmac.new(self.key, digestmod=self.digestmod)
+        h = hmac.new(derived_key, digestmod=self.digestmod)
         digest, raw_msg = (encrypted_msg[:h.digest_size], encrypted_msg[h.digest_size:])
         decrypted_msg = cipher.decrypt(raw_msg)[self.cipher_cls.block_size:]
         h.update(decrypted_msg)
@@ -105,11 +107,11 @@ class Cryptor(BaseCryptor):
 
 
 class FileCryptor(BaseCryptor):
-    def __init__(self, key, cipher_cls=AES, random_generator_cls=Random, digestmod=hashlib.sha256):
-        super(FileCryptor, self).__init__(key, cipher_cls, random_generator_cls, digestmod)
+    def __init__(self, cipher_cls=AES, random_generator_cls=Random, digestmod=hashlib.sha256):
+        super(FileCryptor, self).__init__(cipher_cls, random_generator_cls, digestmod)
         self.file_chunk_size = 1024
 
-    def encrypt_file(self, input_filename, output_filename=None, verify=False, overwrite_existing=True):
+    def encrypt_file(self, key, input_filename, output_filename=None, verify=False, overwrite_existing=True):
         """
         Encrypts the file at the given file path input_filename with the key provided at initialization.
         """
@@ -122,9 +124,9 @@ class FileCryptor(BaseCryptor):
 
         with open(input_filename, 'rb') as input_file:
             with open(output_filename, 'wb') as output_file:
-                self.encrypt_file_obj(input_file, output_file, verify)
+                self.encrypt_file_obj(key, input_file, output_file, verify)
 
-    def decrypt_file(self, input_filename, output_filename=None, verify=False, overwrite_existing=True):
+    def decrypt_file(self, key, input_filename, output_filename=None, verify=False, overwrite_existing=True):
         file_path, extension = os.path.splitext(input_filename)
         if not output_filename:
             if extension == '.encrypted':
@@ -138,29 +140,30 @@ class FileCryptor(BaseCryptor):
 
         with open(input_filename, 'rb') as input_file:
             if verify:
-                digest_size = self.verify_file_obj(input_file)
+                digest_size = self.verify_file_obj(key, input_file)
                 if digest_size is False:
                     raise ValueError("Bad key or contents of input_filename.")
             else:
                 digest_size = 0
 
             with open(output_filename, 'wb') as output_file:
-                self.decrypt_file_obj(input_file, output_file, digest_size=digest_size)
+                self.decrypt_file_obj(key, input_file, output_file, digest_size=digest_size)
 
-    def verify_file(self, filename):
+    def verify_file(self, key, filename):
         """
         Returns True if key is valided for given encrypted file. If either key *or*
         encrypted_filename are not valid, returns False.
         """
         with open(filename, 'rb') as input_file:
-            return self.verify_file_obj(input_file)
+            return self.verify_file_obj(key, input_file)
 
-    def encrypt_file_obj(self, input_file, output_file, verify=False):
+    def encrypt_file_obj(self, key, input_file, output_file, verify=False):
+        derived_key = self.hash_key(key)
         iv = self.initialization_vector()
-        cipher = self.cipher(iv)
+        cipher = self.cipher(derived_key, iv)
 
         if verify:
-            h = hmac.new(self.key, digestmod=self.digestmod)
+            h = hmac.new(derived_key, digestmod=self.digestmod)
             for line in input_file:
                 h.update(line)
             output_file.write(h.digest())
@@ -171,9 +174,10 @@ class FileCryptor(BaseCryptor):
         for line in input_file:
             output_file.write(cipher.encrypt(line))
 
-    def decrypt_file_obj(self, input_file, output_file, digest_size):
+    def decrypt_file_obj(self, key, input_file, output_file, digest_size):
+        derived_key = self.hash_key(key)
         iv = self.initialization_vector(random=False)
-        cipher = self.cipher(iv)
+        cipher = self.cipher(derived_key, iv)
 
         input_file.seek(digest_size)
 
@@ -187,11 +191,12 @@ class FileCryptor(BaseCryptor):
                 output, iv_padding = (output[self.cipher_cls.block_size:], output[:self.cipher_cls.block_size])
             output_file.write(output)
 
-    def verify_file_obj(self, file_):
+    def verify_file_obj(self, key, file_):
+        derived_key = self.hash_key(key)
         iv = self.initialization_vector(random=False)
-        cipher = self.cipher(iv)
+        cipher = self.cipher(derived_key, iv)
 
-        h = hmac.new(self.key, digestmod=self.digestmod)
+        h = hmac.new(derived_key, digestmod=self.digestmod)
         digest = file_.read(h.digest_size)
 
         iv_padding = ''
