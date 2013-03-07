@@ -59,12 +59,14 @@ def decrypt_file(key, input_filename, output_filename=None):
 
 def verified_encrypt_file(key, input_filename, output_filename=None):
     cryptor = FileCryptor()
-    return cryptor.encrypt_file(key, input_filename, output_filename, verify=True)
+    return cryptor.encrypt_file(key, input_filename, output_filename,
+                                verify=True)
 
 
 def verified_decrypt_file(key, input_filename, output_filename=None):
     cryptor = FileCryptor()
-    return cryptor.decrypt_file(key, input_filename, output_filename, verify=True)
+    return cryptor.decrypt_file(key, input_filename, output_filename,
+                                verify=True)
 
 
 def verify_file(key, input_filename):

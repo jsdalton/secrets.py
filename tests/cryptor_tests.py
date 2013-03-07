@@ -287,6 +287,30 @@ class FileCryptorTest(unittest.TestCase):
         # assert
         self.assertFalse(result)
 
+    def test_digest_and_salt_in_file_should_be_unique_for_duplicate_encryptions(self):
+        # setup
+        shutil.copyfile(self.filepath['unencrypted'], self.filepath['test'])
+
+        self.cryptor.encrypt_file(TEST_KEY,
+                                  self.filepath['unencrypted'],
+                                  self.filepath['encryption-test-result'],
+                                  verify=True)
+
+        # Use the decryption file slot just for this test
+        self.cryptor.encrypt_file(TEST_KEY,
+                                  self.filepath['test'],
+                                  self.filepath['decryption-test-result'],
+                                  verify=True)
+
+        with open(self.filepath['encryption-test-result'], 'rb') as input_file:
+            parsed1 = self.cryptor._parse_file_obj(input_file, verified=True)
+        with open(self.filepath['decryption-test-result'], 'rb') as input_file:
+            parsed2 = self.cryptor._parse_file_obj(input_file, verified=True)
+
+        # assert
+        self.assertNotEqual(parsed1['digest'], parsed2['digest'])
+        self.assertNotEqual(parsed1['salt'], parsed2['salt'])
+
 
 class CryptorTest(unittest.TestCase):
     def setUp(self):
@@ -334,8 +358,8 @@ class CryptorTest(unittest.TestCase):
 
         # test should not raise value error
         self.cryptor.decrypt("bad key!", encrypted_value)
-    
-    def test_verify_should_return_digest_size_if_key_and_msg_are_valid(self):
+
+    def test_verify_should_return_true_if_key_and_msg_are_valid(self):
         # setup
         digest_size = hmac.new("foo", digestmod=self.cryptor.digestmod).digest_size
         encrypted_value = self.cryptor.encrypt(TEST_KEY,
@@ -346,7 +370,7 @@ class CryptorTest(unittest.TestCase):
         result = self.cryptor.verify(TEST_KEY, encrypted_value)
 
         # assert
-        self.assertEqual(result, digest_size)
+        self.assertEqual(result, True)
 
     def test_verify_should_return_false_if_key_is_invalid(self):
         # setup
@@ -357,6 +381,18 @@ class CryptorTest(unittest.TestCase):
 
         # assert
         self.assertFalse(result)
+
+    def test_digest_and_salt_should_be_unique_for_duplicate_encryptions(self):
+        # setup test
+        encrypted_value1 = self.cryptor.encrypt(TEST_KEY, "You are my sunshine...", verify=True)
+        encrypted_value2 = self.cryptor.encrypt(TEST_KEY, "You are my sunshine...", verify=True)
+        parsed1 = self.cryptor._parse(encrypted_value1, verified=True)
+        parsed2 = self.cryptor._parse(encrypted_value2, verified=True)
+
+        # assert
+        self.assertNotEqual(parsed1['digest'], parsed2['digest'])
+        self.assertNotEqual(parsed1['salt'], parsed2['salt'])
+
 
 class Sha512DigestModCryptorTest(CryptorTest):
     def setUp(self):

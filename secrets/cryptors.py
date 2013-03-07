@@ -1,4 +1,5 @@
 from Crypto.Cipher import AES, blockalgo
+from Crypto.Protocol.KDF import PBKDF2
 from Crypto import Random
 import hashlib
 import hmac
@@ -10,40 +11,36 @@ class BaseCryptor(object):
     """
     A simple value encryptor / decryptor. Uses CFB mode for encryption
     """
-    def __init__(self, cipher_cls=AES, random_generator_cls=Random, digestmod=hashlib.sha256):
+    def __init__(self, cipher_cls=AES, random_generator_cls=Random,
+                 digestmod=hashlib.sha256, key_deriver=PBKDF2, salt_length=64):
         self.mode = blockalgo.MODE_CFB
-        self.digestmod = digestmod
         self.cipher_cls = cipher_cls
         self.block_size = cipher_cls.block_size
         self.random_generator = random_generator_cls.new()
+        self.digestmod = digestmod
+        self.key_deriver = key_deriver
+        self.salt_length = salt_length
+        self.mac_size = hmac.new("1", digestmod=self.digestmod).digest_size
 
-    def hash_key(self, key):
+    def derive_key(self, key, salt=None):
         """
-        Hashing the key does not provide additional security, but merely ensures that the provided key is the appopriate
-        block size for the cipher.
+        Derives a key from the function provided by self.key_deriver (assumed
+        to be PBKDF2.
         """
-        hash_key = self.digestmod(key).digest()
-        hash_key_size = len(hash_key)
-
         # in the PyCrypto library, key_size can be a tuple or a single integer
         if isinstance(self.cipher_cls.key_size, collections.Sequence):
             acceptable_key_sizes = self.cipher_cls.key_size
         else:
             acceptable_key_sizes = [self.cipher_cls.key_size]
+        max_key_size = max(acceptable_key_sizes)
 
-        # If the full hash_key is an acceptable size for this cipher, use it
-        if hash_key_size in acceptable_key_sizes:
-            return hash_key
+        if salt is None:
+            salt = self.generate_salt(self.salt_length)
 
-        # Ciphers list acceptable key sizes from smallest to biggest. Find the biggest
-        # acceptable key and trim the hash_key to fit it
-        for cipher_key_size in reversed(acceptable_key_sizes):
-            if hash_key_size >= cipher_key_size:
-                return hash_key[:cipher_key_size]
+        return (self.key_deriver(key, salt, dkLen=max_key_size), salt)
 
-        # If no acceptable sizes were found it means the digest function did not
-        # create a large enough key for this cipher
-        raise ValueError("digestmod '%s' does not yield a key of acceptable length" % self.digestmod.__name__)
+    def generate_salt(self, length):
+        return self.random_generator.read(length)
 
     def initialization_vector(self, random=True):
         if random:
@@ -60,60 +57,82 @@ class Cryptor(BaseCryptor):
     A simple message encryptor / decryptor. Uses CFB mode for encryption
     """
     def encrypt(self, key, msg, verify=False):
-        derived_key = self.hash_key(key)
+        """
+        Encrypts msg with key provided. If verify is True, the encrypted
+        msg can be verified.
+        """
+        derived_key, salt = self.derive_key(key)
         iv = self.initialization_vector()
         cipher = self.cipher(derived_key, iv)
         encrypted_msg = iv + cipher.encrypt(msg)
 
         if verify:
             h = hmac.new(derived_key, msg=msg, digestmod=self.digestmod)
-            encrypted_msg = h.digest() + encrypted_msg
+            encrypted_msg = salt + h.digest() + encrypted_msg
+        else:
+            encrypted_msg = salt + encrypted_msg
 
         return encrypted_msg
 
     def decrypt(self, key, encrypted_msg, verify=False):
-        derived_key = self.hash_key(key)
+        """
+        Decrypts msg encrypted with key. If msg was encrypted with verify=True,
+        then verify must be set to True.
+        """
+        if verify:
+            verified = self.verify(key, encrypted_msg)
+            if not verified:
+                raise ValueError("Bad key or encrypted message.")
+        parsed = self._parse(encrypted_msg, verified=verify)
+        derived_key, _ = self.derive_key(key, salt=parsed['salt'])
         iv = self.initialization_vector(random=False)
         cipher = self.cipher(derived_key, iv)
-
-        if verify:
-            digest_size = self.verify(key, encrypted_msg)
-            if digest_size is False:
-                raise ValueError("Bad key or encrypted message.")
-            raw_msg = encrypted_msg[digest_size:]
-        else:
-            raw_msg = encrypted_msg
-
-        return cipher.decrypt(raw_msg)[self.cipher_cls.block_size:]
+        return cipher.decrypt(parsed['raw_msg'])[self.cipher_cls.block_size:]
 
     def verify(self, key, encrypted_msg):
         """
         Returns True if key and encrypted message are valid (and the message
-        was a verified encryption), False otherwise.
+        was a verified encryption), False otherwise. Only works if encrypted_msg
+        was encrypted with verify=True.
         """
-        derived_key = self.hash_key(key)
+        parsed = self._parse(encrypted_msg, verified=True)
+        derived_key, _ = self.derive_key(key, salt=parsed['salt'])
+        h = hmac.new(derived_key, digestmod=self.digestmod)
         iv = self.initialization_vector(random=False)
         cipher = self.cipher(derived_key, iv)
-
-        h = hmac.new(derived_key, digestmod=self.digestmod)
-        digest, raw_msg = (encrypted_msg[:h.digest_size], encrypted_msg[h.digest_size:])
-        decrypted_msg = cipher.decrypt(raw_msg)[self.cipher_cls.block_size:]
+        decrypted_msg = cipher.decrypt(parsed['raw_msg'])[self.cipher_cls.block_size:]
         h.update(decrypted_msg)
+        return parsed['digest'] == h.digest()
 
-        if digest == h.digest():
-            return h.digest_size
+    def _parse(self, encrypted_msg, verified):
+        salt = encrypted_msg[:self.salt_length]
+        if verified:
+            msg_breakpoint = self.salt_length + self.mac_size
+            digest = encrypted_msg[self.salt_length:msg_breakpoint]
+            raw_msg = encrypted_msg[msg_breakpoint:]
         else:
-            return False
+            digest = None
+            raw_msg = encrypted_msg[self.salt_length:]
+        return {
+            'salt': salt,
+            'digest': digest,
+            'raw_msg': raw_msg,
+        }
 
 
 class FileCryptor(BaseCryptor):
-    def __init__(self, cipher_cls=AES, random_generator_cls=Random, digestmod=hashlib.sha256):
-        super(FileCryptor, self).__init__(cipher_cls, random_generator_cls, digestmod)
+    def __init__(self, cipher_cls=AES, random_generator_cls=Random,
+                 digestmod=hashlib.sha256, key_derivor=PBKDF2, salt_length=64):
+        super(FileCryptor, self).__init__(cipher_cls, random_generator_cls,
+                                          digestmod, key_derivor, salt_length)
         self.file_chunk_size = 1024
 
-    def encrypt_file(self, key, input_filename, output_filename=None, verify=False, overwrite_existing=True):
+    def encrypt_file(self, key, input_filename, output_filename=None,
+                     verify=False, overwrite_existing=True):
         """
-        Encrypts the file at the given file path input_filename with the key provided at initialization.
+        Encrypts the file at the given file path input_filename with the key
+        provided. If verify is True, adds a digest which allows encrypted file
+        to be verified.
         """
         if not output_filename:
             output_filename = "%s.encrypted" % input_filename
@@ -126,7 +145,13 @@ class FileCryptor(BaseCryptor):
             with open(output_filename, 'wb') as output_file:
                 self.encrypt_file_obj(key, input_file, output_file, verify)
 
-    def decrypt_file(self, key, input_filename, output_filename=None, verify=False, overwrite_existing=True):
+    def decrypt_file(self, key, input_filename, output_filename=None,
+                     verify=False, overwrite_existing=True):
+        """
+        Decrypts the file at the given file path input_filename with the key
+        provided. If file was encrypted with verify=True, then verify must be
+        True.
+        """
         file_path, extension = os.path.splitext(input_filename)
         if not output_filename:
             if extension == '.encrypted':
@@ -140,27 +165,27 @@ class FileCryptor(BaseCryptor):
 
         with open(input_filename, 'rb') as input_file:
             if verify:
-                digest_size = self.verify_file_obj(key, input_file)
-                if digest_size is False:
+                verified = self.verify_file_obj(key, input_file)
+                if not verified:
                     raise ValueError("Bad key or contents of input_filename.")
-            else:
-                digest_size = 0
-
             with open(output_filename, 'wb') as output_file:
-                self.decrypt_file_obj(key, input_file, output_file, digest_size=digest_size)
+                self.decrypt_file_obj(key, input_file, output_file, verified=verify)
 
     def verify_file(self, key, filename):
         """
-        Returns True if key is valided for given encrypted file. If either key *or*
-        encrypted_filename are not valid, returns False.
+        Returns True if key is valided for given encrypted file. If either key
+        *or* encrypted_filename are not valid, returns False. Only works if
+        file was encrypted with verify=True.
         """
         with open(filename, 'rb') as input_file:
             return self.verify_file_obj(key, input_file)
 
     def encrypt_file_obj(self, key, input_file, output_file, verify=False):
-        derived_key = self.hash_key(key)
+        derived_key, salt = self.derive_key(key)
         iv = self.initialization_vector()
         cipher = self.cipher(derived_key, iv)
+
+        output_file.write(salt)
 
         if verify:
             h = hmac.new(derived_key, digestmod=self.digestmod)
@@ -174,13 +199,14 @@ class FileCryptor(BaseCryptor):
         for line in input_file:
             output_file.write(cipher.encrypt(line))
 
-    def decrypt_file_obj(self, key, input_file, output_file, digest_size):
-        derived_key = self.hash_key(key)
+    def decrypt_file_obj(self, key, input_file, output_file, verified):
+        parsed = self._parse_file_obj(input_file, verified=verified)
+        derived_key, _ = self.derive_key(key, salt=parsed['salt'])
+
+        input_file.seek(parsed['msg_breakpoint'])
+
         iv = self.initialization_vector(random=False)
         cipher = self.cipher(derived_key, iv)
-
-        input_file.seek(digest_size)
-
         iv_padding = ''
         while True:
             chunk = input_file.read(self.file_chunk_size)
@@ -192,13 +218,14 @@ class FileCryptor(BaseCryptor):
             output_file.write(output)
 
     def verify_file_obj(self, key, file_):
-        derived_key = self.hash_key(key)
+        parsed = self._parse_file_obj(file_, verified=True)
+        derived_key, _ = self.derive_key(key, parsed['salt'])
+        h = hmac.new(derived_key, digestmod=self.digestmod)
+
+        file_.seek(parsed['msg_breakpoint'])
+
         iv = self.initialization_vector(random=False)
         cipher = self.cipher(derived_key, iv)
-
-        h = hmac.new(derived_key, digestmod=self.digestmod)
-        digest = file_.read(h.digest_size)
-
         iv_padding = ''
         while True:
             chunk = file_.read(self.file_chunk_size)
@@ -206,11 +233,24 @@ class FileCryptor(BaseCryptor):
                 break
             output = cipher.decrypt(chunk)
             if not iv_padding:
-                output, iv_padding = (output[self.cipher_cls.block_size:], output[:self.cipher_cls.block_size])
+                output, iv_padding = (output[self.cipher_cls.block_size:],
+                                      output[:self.cipher_cls.block_size])
             h.update(output)
 
-        if digest == h.digest():
-            return h.digest_size
-        else:
-            return False
+        return parsed['digest'] == h.digest()
 
+    def _parse_file_obj(self, file_, verified):
+        file_.seek(0)
+        salt = file_.read(self.salt_length)
+        if verified:
+            digest = file_.read(self.mac_size)
+            msg_breakpoint = self.salt_length + self.mac_size
+        else:
+            digest = ''
+            msg_breakpoint = self.salt_length
+        file_.seek(0)
+        return {
+            'salt': salt,
+            'digest': digest,
+            'msg_breakpoint': msg_breakpoint
+        }
