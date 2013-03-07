@@ -51,6 +51,16 @@ class BaseCryptor(object):
     def cipher(self, derived_key, iv):
         return self.cipher_cls.new(derived_key, self.mode, iv)
 
+    def time_invariant_compare(self, a, b):
+        # See http://rdist.root.org/2009/05/28/timing-attack-in-google-keyczar-library/
+        if len(a) != len(b):
+            return False
+
+        result = 0
+        for x, y in zip(a, b):
+            result |= ord(x) ^ ord(y)
+        return result == 0
+
 
 class Cryptor(BaseCryptor):
     """
@@ -102,7 +112,7 @@ class Cryptor(BaseCryptor):
         cipher = self.cipher(derived_key, iv)
         decrypted_msg = cipher.decrypt(parsed['raw_msg'])[self.cipher_cls.block_size:]
         h.update(decrypted_msg)
-        return parsed['digest'] == h.digest()
+        return self.time_invariant_compare(parsed['digest'], h.digest())
 
     def _parse(self, encrypted_msg, verified):
         salt = encrypted_msg[:self.salt_length]
@@ -237,7 +247,7 @@ class FileCryptor(BaseCryptor):
                                       output[:self.cipher_cls.block_size])
             h.update(output)
 
-        return parsed['digest'] == h.digest()
+        return self.time_invariant_compare(parsed['digest'], h.digest())
 
     def _parse_file_obj(self, file_, verified):
         file_.seek(0)

@@ -7,11 +7,25 @@ import shutil
 import unittest
 from Crypto.Cipher import AES, DES, Blowfish
 
-from secrets.cryptors import FileCryptor, Cryptor
+from secrets.cryptors import FileCryptor, Cryptor, BaseCryptor
 from tests import TEST_FILES_DIR
 
 
 TEST_KEY = 'foobar1234'
+
+
+class BaseCryptorTest(unittest.TestCase):
+    def setUp(self):
+        self.cryptor = BaseCryptor()
+
+    def test_time_invariant_compare_should_return_true_if_values_are_equal(self):
+        val = "This is a very funny thing to say here."
+        self.assertEqual(self.cryptor.time_invariant_compare(val, val), True)
+
+    def test_time_invariant_compare_should_return_false_if_values_are_not_equal(self):
+        val1 = "This is a very funny thing to say here."
+        val2 = "foobar"
+        self.assertEqual(self.cryptor.time_invariant_compare(val1, val2), False)
 
 
 class FileCryptorTest(unittest.TestCase):
